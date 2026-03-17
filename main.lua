@@ -1,15 +1,16 @@
--- [[ HUNTER V4 - STABLE & FAST ]] --
+-- [[ HUNTER V5 - NO-STALL VERSION ]] --
 local MIN = 50 
 local URL = "http://localhost:3000/report"
 
-print("--- [!] SKRYPT URUCHOMIONY ---")
+print("--- [!] SKRYPT STARTUJE (V5) ---")
 
--- Funkcja wysyłania (bezpieczna)
+-- Funkcja wysyłania z limitem czasu (timeout)
 local function send(data)
     task.spawn(function()
         local req = request or http_request or (syn and syn.request)
         if req then
-            pcall(function()
+            -- Używamy pcall, żeby błąd sieci nie zatrzymał bota
+            pcall(function() 
                 req({
                     Url = URL,
                     Method = "POST",
@@ -21,46 +22,41 @@ local function send(data)
     end)
 end
 
--- 1. Zwiększ licznik w GUI od razu
+-- 1. Próba raportu do GUI (jeśli nie zadziała, bot idzie dalej)
 send({type = "scan"})
 
--- 2. Skanowanie graczy (w tle)
+-- 2. Skanowanie graczy
 task.spawn(function()
-    print("--- [!] SKANOWANIE... ---")
     local players = game:GetService("Players"):GetPlayers()
     for _, p in pairs(players) do
-        if p ~= game.Players.LocalPlayer then
-            local br = p:FindFirstChild("leaderstats") and p.leaderstats:FindFirstChild("Brainrot")
-            if br and br.Value >= (MIN * 1000000) then
-                print("--- [!] ZNALEZIONO: " .. p.Name)
-                send({
-                    type = "hit",
-                    value = math.floor(br.Value/1000000),
-                    jobId = game.JobId,
-                    userName = p.Name
-                })
-            end
+        local ls = p:FindFirstChild("leaderstats")
+        local br = ls and ls:FindFirstChild("Brainrot")
+        if br and br.Value >= (MIN * 1000000) then
+            print("--- [!] ZNALEZIONO CEL: " .. p.Name)
+            send({
+                type = "hit",
+                value = math.floor(br.Value/1000000),
+                jobId = game.JobId,
+                userName = p.Name
+            })
         end
     end
 end)
 
--- 3. Server Hop po 7 sekundach (NIEZALEŻNY)
-task.wait(7)
-print("--- [!] ZMIANA SERWERA... ---")
+-- 3. TOTALNIE WYMUSZONA ZMIANA SERWERA (Zegar startuje od razu)
+print("--- [!] START ODTRZYMANIA DO ZMIANY (10s) ---")
 
-local function hop()
-    local s = game:GetService("HttpService"):JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Desc&limit=100")).data
-    for _, v in pairs(s) do
-        if v.playing < v.maxPlayers and v.id ~= game.JobId then
-            game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, v.id)
-            return
-        end
-    end
-end
+task.delay(10, function()
+    print("--- [!] CZAS MINĄŁ - WYMUSZAM ZMIANĘ ---")
+    
+    -- Próba 1: Teleportacja
+    pcall(function()
+        local s = game:GetService("HttpService"):JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Desc&limit=100")).data
+        local target = s[math.random(1, #s)].id
+        game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, target)
+    end)
 
--- Jeśli teleportacja zawiedzie, wyrzuć bota (RAM go połączy ponownie)
-task.spawn(function()
-    pcall(hop)
-    task.wait(5)
-    game.Players.LocalPlayer:Kick("Szukanie nowego serwera...")
+    -- Próba 2: Jeśli po 3 sekundach nadal tu jesteś -> KICK
+    task.wait(3)
+    game:GetService("Players").LocalPlayer:Kick("AUTO-HOP")
 end)
