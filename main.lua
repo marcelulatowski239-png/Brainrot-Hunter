@@ -1,81 +1,66 @@
--- [[ TURBO HUNTER V4 - AGGRESSIVE HOP ]] --
+-- [[ HUNTER V4 - STABLE & FAST ]] --
 local MIN = 50 
 local URL = "http://localhost:3000/report"
-local TS = game:GetService("TeleportService")
-local Players = game:GetService("Players")
-local HttpService = game:GetService("HttpService")
 
-print("--- [HUNTER DEBUG]: SKRYPT STARTUJE ---")
+print("--- [!] SKRYPT URUCHOMIONY ---")
 
+-- Funkcja wysyłania (bezpieczna)
 local function send(data)
-    pcall(function()
+    task.spawn(function()
         local req = request or http_request or (syn and syn.request)
         if req then
-            req({
-                Url = URL,
-                Method = "POST",
-                Headers = {["Content-Type"] = "application/json"},
-                Body = HttpService:JSONEncode(data)
-            })
+            pcall(function()
+                req({
+                    Url = URL,
+                    Method = "POST",
+                    Headers = {["Content-Type"] = "application/json"},
+                    Body = game:GetService("HttpService"):JSONEncode(data)
+                })
+            end)
         end
     end)
 end
 
--- 1. Powiedz GUI, że bot jest na serwerze
+-- 1. Zwiększ licznik w GUI od razu
 send({type = "scan"})
 
--- 2. Skanowanie graczy
-print("--- [HUNTER DEBUG]: SKANOWANIE... ---")
-task.wait(2)
-for _, p in pairs(Players:GetPlayers()) do
-    local ls = p:FindFirstChild("leaderstats")
-    local br = ls and ls:FindFirstChild("Brainrot")
-    if br and br.Value >= (MIN * 1000000) then
-        print("--- [HUNTER DEBUG]: ZNALEZIONO CEL: " .. p.Name)
-        send({
-            type = "hit",
-            value = math.floor(br.Value/1000000),
-            jobId = game.JobId,
-            userName = p.Name
-        })
-    end
-end
-
--- 3. Wymuszona zmiana serwera
-print("--- [HUNTER DEBUG]: SZUKANIE NOWEGO SERWERA... ---")
-task.wait(1)
-
-local function doHop()
-    local success, res = pcall(function()
-        return HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Desc&limit=100")).data
-    end)
-
-    if success and res then
-        for _, v in pairs(res) do
-            if v.playing < v.maxPlayers and v.id ~= game.JobId then
-                print("--- [HUNTER DEBUG]: TELEPORTACJA DO: " .. v.id)
-                -- Próba teleportacji
-                TS:TeleportToPlaceInstance(game.PlaceId, v.id, Players.LocalPlayer)
-                
-                -- Jeśli po 5 sekundach nadal tu jesteś, spróbuj ponownie z innym serwerem
-                task.delay(5, function()
-                    if game.JobId == v.id then return end -- Udało się
-                    print("--- [HUNTER DEBUG]: RETRY HOP... ---")
-                end)
+-- 2. Skanowanie graczy (w tle)
+task.spawn(function()
+    print("--- [!] SKANOWANIE... ---")
+    local players = game:GetService("Players"):GetPlayers()
+    for _, p in pairs(players) do
+        if p ~= game.Players.LocalPlayer then
+            local br = p:FindFirstChild("leaderstats") and p.leaderstats:FindFirstChild("Brainrot")
+            if br and br.Value >= (MIN * 1000000) then
+                print("--- [!] ZNALEZIONO: " .. p.Name)
+                send({
+                    type = "hit",
+                    value = math.floor(br.Value/1000000),
+                    jobId = game.JobId,
+                    userName = p.Name
+                })
             end
         end
-    else
-        print("--- [HUNTER DEBUG]: BŁĄD POBIERANIA LISTY SERWERÓW ---")
+    end
+end)
+
+-- 3. Server Hop po 7 sekundach (NIEZALEŻNY)
+task.wait(7)
+print("--- [!] ZMIANA SERWERA... ---")
+
+local function hop()
+    local s = game:GetService("HttpService"):JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Desc&limit=100")).data
+    for _, v in pairs(s) do
+        if v.playing < v.maxPlayers and v.id ~= game.JobId then
+            game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, v.id)
+            return
+        end
     end
 end
 
--- Odpal teleportację
-doHop()
-
--- Zabezpieczenie: Jeśli nic nie zadziała przez 10 sekund, po prostu wyjdź (crash bota do ponownego odpalenia)
-task.wait(15)
-if #Players:GetPlayers() > 0 then
-    print("--- [HUNTER DEBUG]: TOTALNY ZWIESZ - RESTARTUJĘ ---")
-    -- Niektóre executory wymagają rkick() lub po prostu wywalenia gracza
-    Players.LocalPlayer:Kick("Changing Server...")
-end
+-- Jeśli teleportacja zawiedzie, wyrzuć bota (RAM go połączy ponownie)
+task.spawn(function()
+    pcall(hop)
+    task.wait(5)
+    game.Players.LocalPlayer:Kick("Szukanie nowego serwera...")
+end)
